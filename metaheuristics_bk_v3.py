@@ -1,57 +1,79 @@
 """
-metaheuristics_bk v3-beta — Universal Meta-Heuristic Algorithms Library
-=========================================================================
+metaheuristics_bk v3.1 — Universal Meta-Heuristic Algorithms Library
+=====================================================================
 
-V3-BETA: Geniş Kapsam
-----------------------
+Encoding-agnostic metasezgisel optimizasyon kütüphanesi: 7 algoritma
+(BGA, BDE, BPSO, BABC, BGWO, BCS, BSOS) + NSM/EPM rehberlik modülleri +
+NSGA-II + constraint handling + veri-odaklı hızlı başlangıç
+(`select_features`, `load_csv_dataset`).
+
+Sürüm özeti
+-----------
 v1: Sadece feature selection (regression)         — özelleşmiş
 v2: Binary uzayda her problem (custom fitness)    — kısmi genel
-v3-alpha: Binary + Continuous + Categorical + Mixed (3 algoritma)
-v3-beta:  + 2 yeni algoritma (BABC, BGWO)          → 5 toplam
-          + NSGA-II (multi-objective)              → Pareto front
-          + Native constraint handling              → 3 strateji
-
-Bu sürüm artık "sadece ikili" değil — herhangi bir tipte solution uzayında
-herhangi bir optimizasyon problemini çözer. 3 ana algoritma (BGA, BDE, BPSO)
-encoding-agnostic olarak yeniden tasarlandı.
+v3.0: 5 encoding × 7 algoritma + NSM/EPM + NSGA-II + constraints
+v3.1: - Method adları netleşti: 'fdb' (deterministik, Kahraman 2020) ve
+        'rfdb' (rulet, Aras 2021). Eski 'fdb_argmax' → 'fdb' olarak
+        otomatik eşlenir; ESKİ 'fdb' (rulet) artık 'rfdb' adını taşır.
+      - BGWO binary güncellemesi düzeltildi: V-shape transfer POZİSYONA
+        değil ADIMA uygulanır + birey-bazlı greedy seçim (yakınsama hatası
+        giderildi).
+      - Fail-fast: bilinmeyen method değeri anında ValueError.
+      - select_features / load_csv_dataset: herhangi bir CSV/DataFrame ile
+        tek çağrıda özellik seçimi (sağlık verisi, oyun telemetrisi, vb.).
+v0.3.2: BSOS continuous düzeltmesi (orijinal Cheng & Prayogo aritmetiği);
+        MEALPY 3.0.3 ile çapraz doğrulandı.
+v0.3.3: - ContinuousEncoding(distance_metric=...): 'euclidean' (varsayılan,
+          geriye uyumlu) | 'manhattan' (resmi FDB-SOS kodu FEX #72311 ile
+          birebir) | callable (özel metrik). Bilinmeyen değer raise.
+        - run_bsos FDB davranış parametreleri: fdb_phases / fdb_refresh /
+          fdb_exclude_self + fdb_reference preset'i (resmi kod hizası:
+          yalnız-mutualism + seçim-başına skor + self dahil + Manhattan
+          şartı). Doğrulama: validation/fdb_matlab_crosscheck.py.
 
 Mimari
 ------
-1. Encoding sınıfları (Binary, Continuous, Categorical, Mixed):
+1. Encoding sınıfları (Binary, Continuous, Categorical, Mixed, Permutation):
    - Solution uzayını tanımlar
    - init / crossover / mutation / distance metodlarını sağlar
 
-2. Üç rehberlik versiyonu (v1, v2 ile aynı):
-   - 'classic'    → Rehbersiz baz
-   - 'fdb'        → RFDB rulet
-   - 'fdb_argmax' → Deterministik FDB
+2. Üç rehberlik modu (VALID_METHODS):
+   - 'classic' → Rehbersiz baz (turnuva / uniform-random seçim)
+   - 'fdb'     → Klasik FDB (Kahraman et al. 2020): normFitness + normUzaklık
+                 skoru EN YÜKSEK birey DETERMİNİSTİK rehber olur
+   - 'rfdb'    → Rulet-FDB (Aras et al. 2021): FDB skorları rulet ağırlığı
+                 olur, rehber OLASILIKSAL seçilir
 
 3. Universal run_* fonksiyonları:
-   - run_bga(fitness_fn, encoding, ...)
-   - run_bde(fitness_fn, encoding, ...)
-   - run_bpso(fitness_fn, encoding, ...)
+   - run_bga / run_bde / run_bpso / run_babc / run_bgwo / run_bcs / run_bsos
 
 Kullanım
 --------
 >>> from metaheuristics_bk_v3 import run_bga, BinaryEncoding
->>> 
+>>>
 >>> def my_fitness(solution):
 ...     return -solution.sum()  # max ones
->>> 
+>>>
 >>> result = run_bga(
 ...     fitness_fn=my_fitness,
 ...     encoding=BinaryEncoding(n_features=20),
-...     method='fdb_argmax',
+...     method='fdb',
 ...     pop_size=20, max_iter=50, seed=42,
 ... )
 
+Veri-odaklı hızlı başlangıç (CSV → özellik seçimi):
+>>> from metaheuristics_bk_v3 import load_csv_dataset, select_features
+>>> X, y = load_csv_dataset("hasta_verisi.csv", target="teshis")
+>>> out = select_features(X, y, algorithm='bga', method='fdb')
+>>> out['selected']  # seçilen sütun adları
+
 Yazar:  Baki KOÇ (Bursa Teknik Üniversitesi, 2026)
 Lisans: MIT
-Versiyon: 0.3.0-alpha
+Versiyon: 0.3.1
 GitHub: https://github.com/bbakikoc/metaheuristics-bk
 """
 
-__version__ = "0.3.0-rc2"
+__version__ = "0.3.5"
 __author__ = "Baki Koç"
 __license__ = "MIT"
 
@@ -209,11 +231,32 @@ class ContinuousEncoding(Encoding):
         Her boyut için (low, high) aralığı. Boyut sayısı bunun uzunluğudur.
     log_scale : list of bool, optional
         Hangi boyutların log-uniform örneklenmesi gerektiği (örn: learning rate).
+    distance_metric : {'euclidean', 'manhattan'} veya callable, default='euclidean'
+        FDB/NSM gibi mesafe kullanan katmanların metriği (v0.3.3).
+        - 'euclidean': aralık-normalize Öklid (v3 varsayılan davranışı — geriye
+          uyumlu). KBS 2020 makale metnindeki örnek olayla (Fig. 1b) eşleşir.
+        - 'manhattan': HAM |a-b| toplamı — resmi FDB-SOS MATLAB kodu
+          (FEX #72311, fitnessDistanceBalance.m) ile BİREBİR.
+        - callable(a, b) -> float: özel/uyarlanmış metrik (projeye göre).
+        Bilinmeyen değer ValueError üretir (fail-fast, faz3 §3.5).
     """
     
-    def __init__(self, bounds, log_scale=None):
+    _VALID_METRICS = ('euclidean', 'manhattan')
+    
+    def __init__(self, bounds, log_scale=None, distance_metric='euclidean'):
         self.bounds = np.array(bounds, dtype=float)
         self.n_dim = len(bounds)
+        if callable(distance_metric):
+            self.distance_metric = 'custom'
+            self._custom_distance = distance_metric
+        elif distance_metric in self._VALID_METRICS:
+            self.distance_metric = distance_metric
+            self._custom_distance = None
+        else:
+            raise ValueError(
+                f"Bilinmeyen distance_metric: {distance_metric!r}. "
+                f"Geçerli: {self._VALID_METRICS} veya callable(a, b) -> float."
+            )
         if log_scale is None:
             log_scale = [False] * self.n_dim
         self.log_scale = np.array(log_scale, dtype=bool)
@@ -283,7 +326,13 @@ class ContinuousEncoding(Encoding):
         return new_x
     
     def distance(self, a, b):
-        """Normalized Euclidean distance."""
+        """Metrik-farkındalı mesafe (bkz. distance_metric parametresi)."""
+        if self._custom_distance is not None:
+            return float(self._custom_distance(a, b))
+        if self.distance_metric == 'manhattan':
+            # HAM Manhattan — resmi FDB-SOS koduyla (FEX #72311) birebir.
+            return float(np.abs(np.asarray(a) - np.asarray(b)).sum())
+        # 'euclidean' → aralık-normalize Öklid (v3 varsayılanı, geriye uyumlu)
         ranges = self.bounds[:, 1] - self.bounds[:, 0]
         ranges = np.where(ranges == 0, 1.0, ranges)  # 0'a bölmeyi önle
         normalized_diff = (a - b) / ranges
@@ -559,46 +608,124 @@ class PermutationEncoding(Encoding):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BÖLÜM 2: FDB SKOR (encoding-agnostic; mesafe encoding'den gelir)
+# BÖLÜM 2: REHBERLİK METHOD'LARI ve FDB SKOR
+# ═══════════════════════════════════════════════════════════════════════════
+# v3.1 adlandırma sözleşmesi (KALICI — bir daha değişmeyecek):
+#   'classic' → rehbersiz baz
+#   'fdb'     → Klasik FDB (Kahraman et al. 2020, KBS 190:105169):
+#               skor = normFitness + normUzaklık(best'e); EN YÜKSEK skorlu
+#               birey DETERMİNİSTİK olarak rehber seçilir.
+#   'rfdb'    → Rulet-FDB (Aras et al. 2021): aynı skor vektörü rulet
+#               ağırlığı olur; rehber OLASILIKSAL seçilir.
+# Eski adlar: v3.0'da 'fdb_argmax' = bugünkü 'fdb', v3.0'da 'fdb' = bugünkü
+# 'rfdb'. 'fdb_argmax' geriye-uyum için otomatik eşlenir; ESKİ 'fdb'
+# kullanan v3.0 scriptleri v3.1'de FARKLI (deterministik) davranır —
+# CHANGELOG'daki kırıcı değişiklik notuna bak.
 # ═══════════════════════════════════════════════════════════════════════════
 
+VALID_METHODS = ('classic', 'fdb', 'rfdb')
 
-def fdb_scores(population, fitness_vals, encoding: Encoding, method='fdb'):
+_METHOD_ALIASES = {
+    'fdb_argmax': 'fdb',   # v3.0 eski adı → v3.1 kanonik adı
+}
+
+# Kullanım sırasında bir kez basılan hatırlatma metinleri
+_METHOD_HINTS = {
+    'classic': ("[hatırlatma] method='classic' → rehbersiz baz: seçim "
+                "turnuva/uniform-random, FDB skoru devrede değil."),
+    'fdb':     ("[hatırlatma] method='fdb' → Klasik FDB (Kahraman 2020): "
+                "normFitness + best'e-normUzaklık toplamı EN YÜKSEK olan birey "
+                "DETERMİNİSTİK rehber olur. (v3.0'daki adı: 'fdb_argmax')"),
+    'rfdb':    ("[hatırlatma] method='rfdb' → Rulet-FDB (Aras 2021): FDB "
+                "skorları rulet ağırlığıdır, rehber OLASILIKSAL seçilir. "
+                "(v3.0'daki adı: 'fdb')"),
+}
+
+#: Hatırlatma mesajlarını tamamen kapatmak için False yap.
+SHOW_METHOD_HINTS = True
+
+_shown_hints: set = set()
+_shown_alias_warnings: set = set()
+
+
+def _normalize_method(method: str) -> str:
+    """Method adını doğrular, eski adları eşler, bilinmeyende raise eder.
+
+    Fail-fast sözleşmesi: bilinmeyen bir method değeri ASLA sessizce bir
+    varsayılana düşmez — anında ValueError. (Yazım hatası 'fbd' gibi
+    değerlerin sessizce yanlış mekanizma koşturması v3.0'da mümkündü.)
+    """
+    if not isinstance(method, str):
+        raise ValueError(f"method bir string olmalı, verilen: {type(method).__name__}")
+
+    if method in _METHOD_ALIASES:
+        canon = _METHOD_ALIASES[method]
+        if method not in _shown_alias_warnings:
+            print(f"[uyarı] method='{method}' eski (v3.0) ad — yeni adı "
+                  f"'{canon}'. Otomatik eşlendi; scriptini güncellemen önerilir.")
+            _shown_alias_warnings.add(method)
+        method = canon
+
+    if method not in VALID_METHODS:
+        raise ValueError(
+            f"Bilinmeyen method: '{method}'. Geçerli değerler: {VALID_METHODS}. "
+            f"Not: v3.0'daki 'fdb' (rulet) artık 'rfdb'; v3.0'daki "
+            f"'fdb_argmax' (deterministik) artık 'fdb'."
+        )
+
+    if SHOW_METHOD_HINTS and method not in _shown_hints:
+        print(_METHOD_HINTS[method])
+        _shown_hints.add(method)
+
+    return method
+
+
+def fdb_scores(population, fitness_vals, encoding: Encoding, method='rfdb'):
     """Encoding-aware FDB rehberlik skoru.
-    
+
     Mesafe metriği encoding'in distance() metodundan gelir; nf+nd formülü
-    aynı kalır ama Hamming yerine encoding-spesifik mesafe kullanılır.
-    
+    (Kahraman et al. 2020'nin eşit-ağırlıklı FDB skoru ile orantılı) aynı
+    kalır ama Hamming yerine encoding-spesifik mesafe kullanılır.
+
     Parameters
     ----------
     population : list of individuals
     fitness_vals : 1-D array of fitness values
     encoding : Encoding
-    method : {'classic', 'fdb', 'fdb_argmax'}
-    
+    method : {'classic', 'fdb', 'rfdb'}
+        'classic' → tüm skorlar 1 (rehberlik yok)
+        'fdb'     → one-hot: en yüksek FDB skorlu birey 1, diğerleri 0
+                    (deterministik rehber; Kahraman 2020)
+        'rfdb'    → ham FDB skor vektörü (rulet ağırlığı; Aras 2021)
+
     Returns
     -------
     1-D array of scores
+
+    Raises
+    ------
+    ValueError : bilinmeyen method değerinde (fail-fast).
     """
+    method = _normalize_method(method)
     ps = len(population)
     if method == 'classic':
         return np.ones(ps)
-    
+
     fmin, fmax = float(fitness_vals.min()), float(fitness_vals.max())
     nf = np.ones(ps) if fmax == fmin else 1 - (fitness_vals - fmin) / (fmax - fmin)
-    
+
     best_idx = int(np.argmin(fitness_vals))
     best = population[best_idx]
     dist = np.array([encoding.distance(s, best) for s in population], dtype=float)
     dmin, dmax = dist.min(), dist.max()
     nd = np.zeros(ps) if dmax == dmin else (dist - dmin) / (dmax - dmin)
-    
+
     raw = nf + nd
-    if method == 'fdb_argmax':
+    if method == 'fdb':
         out = np.zeros(ps)
         out[int(np.argmax(raw))] = 1.0
         return out
-    return raw
+    return raw  # method == 'rfdb'
 
 
 def _selection_probs(scores):
@@ -659,9 +786,13 @@ def run_bga(fitness_fn: Callable, encoding: Encoding,
         ⚠️ n_jobs > 1 ise pickle-able olmalı (top-level `def`, lambda değil).
     encoding : Encoding
         Solution uzayını ve operatörleri tanımlar.
-    method : {'classic', 'fdb', 'fdb_argmax'}
-        Rehberlik versiyonu. NSM modunda parent seçiminde, EPM modunda
-        Method-1/Method-2 ayrımında kullanılır.
+    method : {'classic', 'fdb', 'rfdb'}
+        Rehberlik modu:
+            'classic' → turnuva seçimi (FDB yok)
+            'fdb'     → deterministik FDB rehber (Kahraman 2020)
+            'rfdb'    → rulet-FDB rehber (Aras 2021)
+        NSM modunda parent seçiminde, EPM modunda Method-1/Method-2
+        ayrımında kullanılır (classic → Method-2, fdb/rfdb → Method-1).
     pop_size : int, default=20
     max_iter : int, default=50
     tournament_k : int, default=3
@@ -704,6 +835,7 @@ def run_bga(fitness_fn: Callable, encoding: Encoding,
     dict with keys: best_sol, best_fit, history, n_evaluations, stopped_early
         NSM modunda ek: _nsm_applied, _greedy_applied, _nsm_accepted, _greedy_accepted
     """
+    method = _normalize_method(method)
     if use_nsm and use_epm:
         # v3-final-rc2: EPM-NSM kombine mod
         if checkpoint_every is not None or resume_from is not None:
@@ -1029,8 +1161,8 @@ def _run_bga_epm(fitness_fn, encoding, method, pop_size, max_iter,
     """BGA + EPM (B2 fazı): H1 epoch + H2 popülasyon update + H3 mate selection.
     
     method:
-        'classic' → EPM Method-2 (tek-best FDB referansı)
-        'fdb'     → EPM Method-1 (her parent için ayrı FDB)
+        'classic'      → EPM Method-2 (tek-best FDB referansı)
+        'fdb' / 'rfdb' → EPM Method-1 (her parent için ayrı FDB)
     
     n_jobs > 1: H1 epoch sonunda P_child fitness'ları paralel hesaplanır.
     """
@@ -1253,6 +1385,7 @@ def run_bde(fitness_fn: Callable, encoding: Encoding,
             method: str = 'classic',
             pop_size: int = 20, max_iter: int = 50,
             F: float = 0.5, CR: float = 0.9,
+            noncont_mutation_rate: Optional[float] = None,
             seed: int = 42, verbose: bool = False,
             n_jobs: int = 1):
     """Universal Differential Evolution.
@@ -1261,7 +1394,22 @@ def run_bde(fitness_fn: Callable, encoding: Encoding,
     encoding'ler için crossover/mutation encoding'in kendisinden gelir 
     (yani bu DE değil, bir GA varyantına dönüşür). Saf DE davranışı için
     ContinuousEncoding kullan.
+    
+    ── UYARLAMA BEYANI (v0.3.5, 25 Eyl 2026) ─────────────────────────────
+    Continuous dışı encoding'lerde (Binary/Categorical/Mixed/Permutation)
+    trial = crossover(pop[r1], pop[i]) → mutate(rate=noncont_mutation_rate).
+    v0.3.4 ve öncesinde mutasyon oranı olarak DE ölçek katsayısı `F` (0.5)
+    geçiriliyordu; BinaryEncoding.mutate bunu BİT-ÇEVİRME OLASILIĞI olarak
+    yorumladığından her adayın bitlerinin ~%50'si çevriliyor ve algoritma
+    rastgele aramaya denk davranıyordu (OneMax n=60, 1000 FE: F=0.5 → hata
+    14–20, rastgele arama 18–20, F=1/n → 0; MEALPY-DE 11.5). v0.3.5:
+    `noncont_mutation_rate=None` → encoding varsayılanı (Binary: 1/n).
+    `F` ve `CR` yalnız ContinuousEncoding'de kullanılır. RNG akışı
+    continuous'ta değişmedi; binary'de DEĞİŞTİ (v0.3.4 binary BDE
+    sonuçlarıyla aynı seed farklı sonuç verir).
+    ────────────────────────────────────────────────────────────────────────
     """
+    method = _normalize_method(method)
     rng = np.random.RandomState(seed)
     pop = encoding.init_population(pop_size, rng)
     fit = _eval_pop(fitness_fn, pop, n_jobs=n_jobs)
@@ -1299,7 +1447,8 @@ def run_bde(fitness_fn: Callable, encoding: Encoding,
                 trial[mask] = mutant[mask]
             else:
                 c1, _ = encoding.crossover(rng, pop[r1], pop[i])
-                trial = encoding.mutate(rng, c1, F)
+                # v0.3.5: mutasyon oranı F DEĞİL (bkz. UYARLAMA BEYANI)
+                trial = encoding.mutate(rng, c1, noncont_mutation_rate)
             trials.append(trial)
         
         # Paralel batch eval
@@ -1350,6 +1499,7 @@ def run_bpso(fitness_fn: Callable, encoding: Encoding,
     Eberhart 1997). ContinuousEncoding ile klasik PSO. Categorical/Mixed 
     için PSO doğal değil; bu durumlarda BGA önerilir.
     """
+    method = _normalize_method(method)
     rng = np.random.RandomState(seed)
     pop = encoding.init_population(pop_size, rng)
     fit = _eval_pop(fitness_fn, pop, n_jobs=n_jobs)
@@ -1380,12 +1530,18 @@ def run_bpso(fitness_fn: Callable, encoding: Encoding,
     history = [gbest_fit]
     
     for it in range(max_iter):
-        # FDB skoru → gbest yerine FDB-rehber kullan (method != classic için)
-        scores = fdb_scores(pop, fit, encoding, method=method)
+        # Rehber seçimi (v3.1: 'fdb' ve 'rfdb' artık farklı davranır —
+        # v3.0'da ikisi de argmax'a düşüyordu)
         if method == 'classic':
             guide = gbest
         else:
-            guide_idx = int(np.argmax(scores))
+            scores = fdb_scores(pop, fit, encoding, method=method)
+            if method == 'fdb':
+                # Deterministik: one-hot skorun argmax'ı = FDB-best
+                guide_idx = int(np.argmax(scores))
+            else:  # 'rfdb'
+                # Olasılıksal: FDB skorları rulet ağırlığı
+                guide_idx = int(rng.choice(pop_size, p=_selection_probs(scores)))
             guide = pop[guide_idx]
         
         for i in range(pop_size):
@@ -1567,8 +1723,10 @@ def run_babc(fitness_fn, encoding,
     Parameters
     ----------
     limit : int or None
-        Bir kaynak limit kez gelişmezse terk edilir (default: pop_size * dim / 2)
+        Bir kaynak limit kez gelişmezse terk edilir
+        (default: max(5, pop_size * dim // 4))
     """
+    method = _normalize_method(method)
     rng = np.random.RandomState(seed)
     pop = encoding.init_population(pop_size, rng)
     fit = _eval_pop(fitness_fn, pop, n_jobs=n_jobs)
@@ -1703,16 +1861,20 @@ def run_bgwo(fitness_fn, encoding,
              pop_size=20, max_iter=50,
              seed=42, verbose=False,
              n_jobs=1):
-    """Universal Grey Wolf Optimizer (V-shape variant + Elitism).
+    """Universal Grey Wolf Optimizer (adım-bazlı V-shape + greedy seçim).
     
-    Mafarja & Mirjalili 2018'in V-shape varyantı encoding-aware olarak.
-    Continuous için klasik GWO, binary için V-shape transfer fonksiyonu.
+    Binary uzayda V-shape transfer fonksiyonu (|tanh|, bkz. Mirjalili & Lewis
+    2013; Mafarja & Mirjalili 2018) ADIM büyüklüğüne uygulanır ve child
+    birey-bazlı greedy ile kabul edilir (v3.1 düzeltmesi). Continuous için
+    klasik GWO (Mirjalili et al. 2014).
     
     GWO'nun 3 lider yapısı (alpha, beta, delta) FDB ile birleşir:
-    method='classic'    → 3 lider klasik GWO (en iyi 3 birey)
-    method='fdb'        → FDB skorlu rulet ile lider seç
-    method='fdb_argmax' → en yüksek FDB skorlu birey alpha
+    method='classic' → 3 lider klasik GWO (en iyi 3 fitness)
+    method='fdb'     → deterministik: en yüksek FDB skorlu birey alpha
+                       (one-hot skorla top-3 sıralaması alpha'yı FDB-best yapar)
+    method='rfdb'    → 3 lider ham FDB skor sıralamasından (çeşitli liderler)
     """
+    method = _normalize_method(method)
     rng = np.random.RandomState(seed)
     pop = encoding.init_population(pop_size, rng)
     fit = _eval_pop(fitness_fn, pop, n_jobs=n_jobs)
@@ -1770,7 +1932,14 @@ def run_bgwo(fitness_fn, encoding,
                 new_x = np.clip(new_x, encoding.bounds[:, 0], encoding.bounds[:, 1])
                 new_pop.append(new_x)
             else:
-                # Binary GWO: V-shape transfer (Mafarja & Mirjalili 2018)
+                # Binary GWO — v3.1 düzeltmesi:
+                # V-shape transfer POZİSYONA değil ADIMA uygulanır.
+                # v3.0 hatası: prob = |tanh(avg_pozisyon)| + flip semantiği,
+                # liderlerin '1' dediği bitleri yakınsamada bile ~%76 olasılıkla
+                # flip'liyordu → algoritma yakınsayamıyordu (OneMax'ta ampirik
+                # olarak doğrulandı). Literatür semantiği (Mirjalili & Lewis
+                # 2013; Mafarja & Mirjalili 2018): transfer fonksiyonu DEĞİŞİM
+                # büyüklüğüne uygulanır; yakınsamada adım→0 → flip olasılığı→0.
                 A1 = 2 * a * rng.rand(encoding.dim) - a
                 A2 = 2 * a * rng.rand(encoding.dim) - a
                 A3 = 2 * a * rng.rand(encoding.dim) - a
@@ -1783,11 +1952,9 @@ def run_bgwo(fitness_fn, encoding,
                 X3_cont = delta.astype(float) - A3 * np.abs(C3 * delta.astype(float) - pop[i].astype(float))
                 
                 avg_cont = (X1_cont + X2_cont + X3_cont) / 3
-                # V-shape transfer: T(x) = |tanh(x)|
-                prob = np.abs(np.tanh(avg_cont))
-                new_x = (rng.rand(encoding.dim) < prob).astype(int)
-                # Elitism: ya 0 ya da xor — basitleştirme: olasılığa göre 0/1
-                # Aslında Mafarja 2018'in formülü: V > rand ise flip
+                step = avg_cont - pop[i].astype(float)  # önerilen konum − mevcut konum
+                # V-shape transfer: T(Δx) = |tanh(Δx)| → flip olasılığı
+                prob = np.abs(np.tanh(step))
                 flip_mask = rng.rand(encoding.dim) < prob
                 new_x = pop[i].copy()
                 new_x[flip_mask] ^= 1
@@ -1795,16 +1962,25 @@ def run_bgwo(fitness_fn, encoding,
                     new_x[rng.randint(0, encoding.dim)] = 1
                 new_pop.append(new_x)
         
-        # Greedy seçim + elitism
         new_fit = np.array([fitness_fn(s) for s in new_pop])
         n_eval += pop_size
         
-        # Elitism: önceki en iyiyi koru
-        worst_new = int(np.argmax(new_fit))
-        best_old = int(np.argmin(fit))
-        if fit[best_old] < new_fit[worst_new]:
-            new_pop[worst_new] = _copy_solution(pop[best_old])
-            new_fit[worst_new] = fit[best_old]
+        if is_binary:
+            # v3.1: birey-bazlı greedy seçim — child ancak daha iyiyse geçer.
+            # (v3.0'ın tüm-popülasyon değişimi + tek-birey elitizmi binary'de
+            # yetersizdi; greedy ile OneMax performansı ~5 kat iyileşti.)
+            for i in range(pop_size):
+                if new_fit[i] >= fit[i]:
+                    new_pop[i] = pop[i]
+                    new_fit[i] = fit[i]
+        else:
+            # Continuous: kanonik GWO koşulsuz hareket eder; yalnız
+            # elitizm koruması uygulanır (önceki en iyi kaybolmasın).
+            worst_new = int(np.argmax(new_fit))
+            best_old = int(np.argmin(fit))
+            if fit[best_old] < new_fit[worst_new]:
+                new_pop[worst_new] = _copy_solution(pop[best_old])
+                new_fit[worst_new] = fit[best_old]
         
         pop = new_pop
         fit = new_fit
@@ -1908,7 +2084,8 @@ def run_bcs(fitness_fn: Callable, encoding: Encoding,
                                birleştirir.
         Phase 2 (Nest abandonment): pa olasılığıyla yuvalar terkedilir.
             method='classic' → uniform random reset
-            method='fdb'     → FDB-rouletted rehberin komşusu
+            method='fdb'     → deterministik FDB rehberin komşusu
+            method='rfdb'    → rulet-FDB ile seçilen rehberin komşusu
     
     Encoding-aware: `_levy_perturb` her tipte uygun adımı üretir.
     
@@ -1918,7 +2095,7 @@ def run_bcs(fitness_fn: Callable, encoding: Encoding,
         Minimize edilecek fitness.
     encoding : Encoding
         Solution uzayı.
-    method : {'classic', 'fdb'}
+    method : {'classic', 'fdb', 'rfdb'}
     pop_size : int, default=20
     max_iter : int, default=50
     pa : float, default=0.25
@@ -1932,6 +2109,7 @@ def run_bcs(fitness_fn: Callable, encoding: Encoding,
     -------
     dict with keys: best_sol, best_fit, history, n_evaluations
     """
+    method = _normalize_method(method)
     rng = np.random.RandomState(seed)
     
     pop = encoding.init_population(pop_size, rng)
@@ -1966,7 +2144,7 @@ def run_bcs(fitness_fn: Callable, encoding: Encoding,
                 if method == 'classic':
                     new_x = encoding.init_individual(rng)
                 else:
-                    # FDB-rouletted rehber + 1 mutasyon
+                    # FDB rehber (fdb: one-hot → hep FDB-best; rfdb: rulet) + 1 mutasyon
                     guide_idx = int(rng.choice(pop_size, p=probs))
                     new_x = encoding.mutate(rng, _copy_solution(pop[guide_idx]),
                                            rate=1.0 / max(1, encoding.dim))
@@ -1991,25 +2169,57 @@ def run_bcs(fitness_fn: Callable, encoding: Encoding,
     }
 
 
-def _bsos_select_partner(rng, pop_size, exclude_i, method, probs):
-    """BSOS partner seçimi — i'den farklı."""
-    if method == 'classic' or probs is None:
-        avail = [j for j in range(pop_size) if j != exclude_i]
+_BSOS_PHASES = ('mutualism', 'commensalism', 'parasitism')
+
+
+def _bsos_select_partner(rng, pop, fit, encoding, i, method, phase,
+                         fdb_phases, fdb_exclude_self, raw_scores):
+    """BSOS partner seçimi (v0.3.3).
+
+    phase, fdb_phases içinde değilse veya method='classic' ise partner
+    uniform-random ≠ i seçilir (orijinal SOS ve resmi FDB-SOS kodunun
+    FDB-dışı fazlardaki davranışı).
+
+    FDB'li fazlarda:
+    - 'fdb'  → HAM skor argmax'ı (deterministik). fdb_exclude_self=True ise
+      i maskelenir (self hariç en iyi); False ise resmi kod gibi j==i olabilir.
+    - 'rfdb' → ham skorlar rulet ağırlığıdır; fdb_exclude_self=True ise i'nin
+      ağırlığı sıfırlanır. Dejenere toplamda uniform'a düşülür.
+
+    raw_scores: fdb_scores(..., method='rfdb') çıktısı (ham nf+nd vektörü);
+    tazeleme kararı (iter/selection) çağıran tarafta verilir.
+    """
+    pop_size = len(pop)
+    if method == 'classic' or phase not in fdb_phases:
+        avail = [j for j in range(pop_size) if j != i]
         return int(rng.choice(avail))
-    sub = np.array([probs[j] if j != exclude_i else 0.0 for j in range(pop_size)])
-    s = sub.sum()
+    if method == 'fdb':
+        if fdb_exclude_self:
+            masked = np.asarray(raw_scores, dtype=float).copy()
+            masked[i] = -np.inf
+            return int(np.argmax(masked))
+        return int(np.argmax(raw_scores))
+    # method == 'rfdb'
+    w = np.maximum(np.asarray(raw_scores, dtype=float), 0.0).copy()
+    if fdb_exclude_self:
+        w[i] = 0.0
+    s = w.sum()
     if s <= 1e-12:
-        avail = [j for j in range(pop_size) if j != exclude_i]
-        return int(rng.choice(avail))
-    sub = sub / s
-    return int(rng.choice(pop_size, p=sub))
+        cand = ([j for j in range(pop_size) if j != i]
+                if fdb_exclude_self else list(range(pop_size)))
+        return int(rng.choice(cand))
+    return int(rng.choice(pop_size, p=w / s))
 
 
 def run_bsos(fitness_fn: Callable, encoding: Encoding,
              method: str = 'classic',
              pop_size: int = 20, max_iter: int = 50,
              seed: int = 42, verbose: bool = False,
-             n_jobs: int = 1):
+             n_jobs: int = 1,
+             fdb_phases=_BSOS_PHASES,
+             fdb_refresh: str = 'iter',
+             fdb_exclude_self: bool = True,
+             fdb_reference: bool = False):
     """Universal Symbiotic Organisms Search — 3 fazlı (Cheng & Prayogo 2014).
     
     Phase 1 (Mutualism):
@@ -2029,7 +2239,29 @@ def run_bsos(fitness_fn: Callable, encoding: Encoding,
     
     method:
         'classic' → tüm fazlarda partner = uniform random ≠ self
-        'fdb'     → tüm fazlarda partner = FDB-rouletted ≠ self
+        'fdb'     → partner = FDB skoru argmax'ı (deterministik)
+        'rfdb'    → partner = rulet-FDB ile seçilir
+    
+    FDB davranış parametreleri (v0.3.3 — resmi kod hizası için):
+    fdb_phases : tuple, default = üç faz da
+        FDB rehberliğinin uygulanacağı fazlar. Resmi FDB-SOS kodu (FEX
+        #72311) YALNIZ ('mutualism',) kullanır; kütüphanenin tarihsel
+        varsayılanı üç fazdır (FDB-uyarlaması). Bilinmeyen faz adı raise.
+    fdb_refresh : {'iter', 'selection'}, default 'iter'
+        'iter' → skorlar iterasyon başında bir kez hesaplanır (v3 davranışı).
+        'selection' → her seçim çağrısında güncel popülasyonla yeniden
+        hesaplanır (resmi kod davranışı).
+    fdb_exclude_self : bool, default True
+        True → partner asla i olamaz (v3 davranışı). False → resmi kod gibi
+        argmax/rulet i'yi de seçebilir.
+    fdb_reference : bool, default False
+        True → üç parametreyi resmi kod hizasına zorlar:
+        fdb_phases=('mutualism',), fdb_refresh='selection',
+        fdb_exclude_self=False. ContinuousEncoding kullanılıyorsa
+        distance_metric='manhattan' ŞARTTIR (değilse raise — sessiz metrik
+        değişimi yapılmaz). Bu preset ile koşum, raporlarda
+        "FDB-SOS (Kahraman 2020, resmi kod hizası)" olarak etiketlenebilir;
+        preset dışı kombinasyonlar "FDB-uyarlaması"dır (faz3 §3.5).
     
     Encoding-aware: Tüm operatörler encoding.crossover, encoding.mutate
     üzerinden geliyor; Binary-OR/XOR varsayımları yok.
@@ -2038,7 +2270,7 @@ def run_bsos(fitness_fn: Callable, encoding: Encoding,
     ----------
     fitness_fn : callable
     encoding : Encoding
-    method : {'classic', 'fdb'}
+    method : {'classic', 'fdb', 'rfdb'}
     pop_size : int, default=20
     max_iter : int, default=50
     seed : int, default=42
@@ -2048,6 +2280,30 @@ def run_bsos(fitness_fn: Callable, encoding: Encoding,
     -------
     dict with keys: best_sol, best_fit, history, n_evaluations
     """
+    method = _normalize_method(method)
+    if fdb_reference:
+        fdb_phases = ('mutualism',)
+        fdb_refresh = 'selection'
+        fdb_exclude_self = False
+        if (isinstance(encoding, ContinuousEncoding)
+                and encoding.distance_metric != 'manhattan'):
+            raise ValueError(
+                "fdb_reference=True resmi MATLAB koduyla (FEX #72311) birebir "
+                "hiza demektir ve HAM Manhattan mesafesi gerektirir. Encoding'i "
+                "ContinuousEncoding(bounds, distance_metric='manhattan') olarak "
+                "kurun. (Sessiz metrik değişimi yapılmaz — faz3 §3.5.)"
+            )
+    fdb_phases = tuple(fdb_phases)
+    for _p in fdb_phases:
+        if _p not in _BSOS_PHASES:
+            raise ValueError(
+                f"Bilinmeyen fdb_phases öğesi: {_p!r}. Geçerli: {_BSOS_PHASES}"
+            )
+    if fdb_refresh not in ('iter', 'selection'):
+        raise ValueError(
+            f"Bilinmeyen fdb_refresh: {fdb_refresh!r}. "
+            f"Geçerli: 'iter' | 'selection'"
+        )
     rng = np.random.RandomState(seed)
     
     pop = encoding.init_population(pop_size, rng)
@@ -2062,16 +2318,45 @@ def run_bsos(fitness_fn: Callable, encoding: Encoding,
     # Parazit mutasyon oranı (encoding'e göre adapte)
     parasite_rate = max(0.2, 1.5 / max(1, encoding.dim))
     
+    # v3.1.1: ContinuousEncoding için ORİJİNAL SOS aritmetiği (Cheng &
+    # Prayogo 2014). Diğer encoding'lerde crossover-tabanlı UYARLAMA sürer
+    # (aritmetik hamle binary/kategorik/permütasyonda tanımsız).
+    is_continuous = isinstance(encoding, ContinuousEncoding)
+    if is_continuous:
+        _lo = encoding.bounds[:, 0]
+        _hi = encoding.bounds[:, 1]
+    
     for it in range(max_iter):
-        scores = fdb_scores(pop, fit, encoding, method=method)
-        probs = _selection_probs(scores) if method != 'classic' else None
+        # 'iter' modunda skorlar iterasyon başında BİR KEZ hesaplanır;
+        # 'selection' modunda her seçim çağrısında güncel pop/fit ile
+        # yeniden hesaplanır (resmi kod davranışı).
+        raw_iter = (fdb_scores(pop, fit, encoding, method='rfdb')
+                    if (method != 'classic' and fdb_refresh == 'iter') else None)
+        
+        def _partner(phase, i):
+            raw = raw_iter
+            if (method != 'classic' and phase in fdb_phases
+                    and fdb_refresh == 'selection'):
+                raw = fdb_scores(pop, fit, encoding, method='rfdb')
+            return _bsos_select_partner(rng, pop, fit, encoding, i, method,
+                                        phase, fdb_phases, fdb_exclude_self,
+                                        raw)
         
         for i in range(pop_size):
             # ─── Phase 1: Mutualism ─────────────────────────────────
-            j = _bsos_select_partner(rng, pop_size, i, method, probs)
-            # i ve j ayrı ayrı gbest'e yaklaşır (crossover with gbest)
-            new_i, _ = encoding.crossover(rng, pop[i], gbest)
-            new_j, _ = encoding.crossover(rng, pop[j], gbest)
+            j = _partner('mutualism', i)
+            if is_continuous:
+                # Orijinal: MV=(Xi+Xj)/2; BF∈{1,2};
+                # Xnew = X + rand(0,1)·(Xbest − MV·BF)
+                mv = (np.asarray(pop[i]) + np.asarray(pop[j])) / 2.0
+                bf1 = rng.randint(1, 3)
+                bf2 = rng.randint(1, 3)
+                new_i = np.clip(pop[i] + rng.rand(encoding.dim) * (gbest - mv * bf1), _lo, _hi)
+                new_j = np.clip(pop[j] + rng.rand(encoding.dim) * (gbest - mv * bf2), _lo, _hi)
+            else:
+                # UYARLAMA: i ve j ayrı ayrı gbest'e yaklaşır (crossover)
+                new_i, _ = encoding.crossover(rng, pop[i], gbest)
+                new_j, _ = encoding.crossover(rng, pop[j], gbest)
             
             f_i = float(fitness_fn(new_i)); n_eval += 1
             f_j = float(fitness_fn(new_j)); n_eval += 1
@@ -2085,9 +2370,14 @@ def run_bsos(fitness_fn: Callable, encoding: Encoding,
                     gbest = _copy_solution(new_j); gbest_fit = f_j
             
             # ─── Phase 2: Commensalism ──────────────────────────────
-            j = _bsos_select_partner(rng, pop_size, i, method, probs)
-            # i, gbest'e doğru çekilir (j hareket etmez — commensalism)
-            new_i, _ = encoding.crossover(rng, pop[i], gbest)
+            j = _partner('commensalism', i)
+            if is_continuous:
+                # Orijinal: Xi_new = Xi + rand(−1,1)·(Xbest − Xj)
+                new_i = np.clip(pop[i] + rng.uniform(-1.0, 1.0, encoding.dim)
+                                * (gbest - np.asarray(pop[j])), _lo, _hi)
+            else:
+                # UYARLAMA: i, gbest'e doğru çekilir (j hareket etmez)
+                new_i, _ = encoding.crossover(rng, pop[i], gbest)
             f_i = float(fitness_fn(new_i)); n_eval += 1
             if f_i < fit[i]:
                 pop[i] = new_i; fit[i] = f_i
@@ -2095,9 +2385,17 @@ def run_bsos(fitness_fn: Callable, encoding: Encoding,
                     gbest = _copy_solution(new_i); gbest_fit = f_i
             
             # ─── Phase 3: Parasitism ────────────────────────────────
-            j = _bsos_select_partner(rng, pop_size, i, method, probs)
-            parasite = encoding.mutate(rng, _copy_solution(pop[i]),
-                                       rate=parasite_rate)
+            j = _partner('parasitism', i)
+            if is_continuous:
+                # Orijinal: parazit = Xi kopyası, rastgele boyut alt-kümesi
+                # uniform-random yeniden örneklenir; j ile rekabet eder.
+                parasite = np.asarray(_copy_solution(pop[i]), dtype=float)
+                n_mut = rng.randint(1, encoding.dim + 1)
+                dims = rng.choice(encoding.dim, size=n_mut, replace=False)
+                parasite[dims] = _lo[dims] + rng.rand(n_mut) * (_hi[dims] - _lo[dims])
+            else:
+                parasite = encoding.mutate(rng, _copy_solution(pop[i]),
+                                           rate=parasite_rate)
             f_par = float(fitness_fn(parasite)); n_eval += 1
             if f_par < fit[j]:
                 pop[j] = parasite; fit[j] = f_par
@@ -2458,11 +2756,22 @@ def _fast_non_dominated_sort_with_constraints(fitness_matrix, violations):
 # BÖLÜM 6: NSM ve EPM MODÜLLERİ (Encoding-Aware)
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# NSM (Natural Survivor Method, Kahraman et al.):
+# NSM (Natural Survivor Method, Kahraman et al. 2023, EAAI 122:106121):
 #   Survivor selection adımında klasik greedy karşılaştırma yerine
-#   3 bileşenli (OFS = fitness, MPS = best'e mesafe, PS = merkez'e mesafe)
-#   ağırlıklı skor kullanır. Sigmoid switch ile erken iter greedy, geç iter
-#   NSM aktif olur. Çeşitliliği artırır, lokal optimumdan kaçışı kolaylaştırır.
+#   3 bileşenli (OFS = fitness, MPS, PS) ağırlıklı skor kullanır.
+#
+#   ⚠ UYARLAMA BEYANI (bu implementasyon makaleyle BİREBİR DEĞİLDİR):
+#   1. Makalede MPS = mating pool'daki rehberlere uzaklık; burada TEK best
+#      bireye uzaklık ile yaklaşıklanır.
+#   2. Makalede PS = P popülasyonuna katkı (bireylere uzaklık); burada
+#      top-K bireyin merkezine uzaklık ile yaklaşıklanır.
+#   3. nsm_decide'daki erken-çıkış kuralları (f_new < f_best → kabul,
+#      f_old == f_best → koru) makalede yoktur; eklenmiş elitizm korumalarıdır.
+#   4. sigmoid_switch'in "erken greedy → geç NSM" yönü ve sabit 15 eğimi bir
+#      TASARIM SEÇİMİDİR; makale linear/step/sigmoid/kaotik sinyalleri iki
+#      yönde de tarar ve en iyi strateji problem-bağımlıdır (mak. Table 2).
+#   Bir yayında bu modülü kullanırken "NSM-uyarlaması" olarak adlandır ve
+#   atfı orijinale ver (faz3 §3.5 varyant adlandırma kuralı).
 #
 # EPM (Evolutionary Population Management, Üstünsoy et al. 2025 KBS 328:114221):
 #   3 hipotez:
@@ -2472,6 +2781,32 @@ def _fast_non_dominated_sort_with_constraints(fitness_matrix, violations):
 #     H3: Yeni P'nin fit-half ve fdb-half'ı convergence için eşleştirilir
 #         (crossover'da parent2 = epm_guide_select sonucu)
 #
+#   ✔ RESMİ KOD DOĞRULAMASI (10 Tem 2026, FEX #181754, v0.3.4):
+#   epm_population_update() seçim indeksleri resmi pop_productions.m
+#   (Method-1) ve pop_productions_2.m (Method-2) transkriptleriyle 10.000
+#   rastgele popülasyonda BİREBİR özdeş (validation/epm_matlab_crosscheck.py
+#   T1–T3). Resmi kod makale pseudo-kodundaki iki belirsizliği şöyle çözer
+#   ve kütüphane AYNI taraftadır: (a) U = [P; Pchild] — ebeveynler önce
+#   (makale Eq. 6'nın tersi); (b) akraba ofseti ±n (Algorithm-2'deki
+#   "n/2" yazımında n = |U| = 2n'dir). Method-1/2 FDB skoru resmi kodda
+#   HAM Manhattan kullanır → continuous'ta hiza için
+#   ContinuousEncoding(distance_metric='manhattan') gerekir.
+#
+#   ⚠ UYARLAMA BEYANI (kalan sapmalar — bilinçli):
+#   1. Eşit-fitness kenar durumu: resmi kod randperm (non-deterministik);
+#      kütüphane deterministik davranır (kanonik sayı üretimi önceliği).
+#   2. Doldurma prosedürü: FL nedeniyle fdb-yarı dolamazsa kütüphane kalan
+#      en iyi bireyle doldurur; resmi kodda tanımsız.
+#   3. H3 rehber eşleşmesi: resmi kod algoritma/Case-özgü stratejiler
+#      kullanır (ör. EPM-AGDE V2'de h↔h+45, AGDE'nin ilk-5/son-5 şablonu);
+#      kütüphane makale Fig. 4 kanonik eşleşmesini (i↔i+n/2) genelleştirir.
+#   4. H1 ayrışması: resmi EPM-AGDE kodu epoch İÇİNDE açgözlü ebeveyn
+#      değiştirmeyi (DE seçimi) KORUR — makale Algorithm-4'te bu satırlar
+#      çıkarılmıştır (makale-kod farkı; SAVUNMA_DOSYASI kalemi). Kütüphane
+#      makale tarafındadır: epoch içinde P güncellenmez.
+#   Yayın çerçevesi: H2 çekirdeği "resmi kodla doğrulanmış"; algoritma-bütünü
+#   iddiaları için ad "EPM-uyarlaması", atıf orijinale (faz3 §3.5).
+#
 # Encoding-Aware Tasarım Notu:
 #   v2'deki NSM/EPM kodları binary varsayıyordu (Manhattan distance, XOR-Hamming).
 #   v3'te tüm distance'lar `encoding.distance(a,b)` üzerinden, popülasyon
@@ -2480,7 +2815,10 @@ def _fast_non_dominated_sort_with_constraints(fitness_matrix, violations):
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ─── NSM Tuning Preset'leri ───────────────────────────────────────────────
-# katsayi[k] = (w_OFS, w_PS, w_MPS) — MATLAB NSM.m birebir
+# katsayi[k] = (w_OFS, w_PS, w_MPS)
+# Kaynak: Kahraman grubunun paylaştığı MATLAB NSM.m dosyasından aktarım
+# (ders projesi döneminde doğrulandı). Bu sayılar 2023 NSM makalesinin
+# METNİNDE yer almaz — provenance MATLAB kodudur.
 NSM_PRESETS = {
     1:  (0.9548, 0.1114, 0.1188),
     2:  (0.9388, 0.8586, 0.2677),
@@ -2510,6 +2848,10 @@ def sigmoid_switch(t: int, T: int) -> float:
     Erken iter (t/T küçük) → ~0 (greedy hakim)
     Geç iter   (t/T büyük) → ~1 (NSM hakim)
     sigmoid(15·(progress − 0.5)) ile yumuşak geçiş; orta noktada %50.
+
+    Not: 15 eğimi ve "geç iter'de NSM" yönü bu kütüphanenin tasarım
+    seçimidir; Kahraman 2023 makalesinin kanonik stratejisi değildir
+    (makale birden çok switch sinyali tarar).
     """
     if T <= 0:
         return 0.0
@@ -2685,8 +3027,8 @@ def epm_population_update(P: list, F: np.ndarray,
     P, F           : parent popülasyonu (n birey) ve fitness'ı
     P_child, F_child: çocuk popülasyonu (n birey) ve fitness'ı
     encoding       : distance() metric için
-    method         : 'classic' → Method-2 (tek-best FDB referansı)
-                     'fdb'     → Method-1 (her parent için ayrı FDB)
+    method         : 'classic'      → Method-2 (tek-best FDB referansı)
+                     'fdb' / 'rfdb' → Method-1 (her parent için ayrı FDB)
     
     Returns
     -------
@@ -2831,7 +3173,7 @@ def epm_nsm_population_update(P: list, F: np.ndarray,
     ----------
     P, F, P_child, F_child : EPM input
     encoding : distance() ve population_center() için
-    method : 'classic' (Method-2) veya 'fdb' (Method-1)
+    method : 'classic' (Method-2) veya 'fdb'/'rfdb' (Method-1)
     switch_prob : NSM uygulama olasılığı [0,1]. 0 → klasik EPM birebir.
     nsm_weights : (w_OFS, w_PS, w_MPS) — None → NSM_PRESETS[6]
     nsm_merkez_sayisi : NSM PS top-K
@@ -3087,6 +3429,7 @@ def tune_and_run(fitness_fn, encoding,
                  n_trials_per_config=2,
                  budget=2000,
                  seed=42,
+                 n_jobs=1,
                  verbose=False):
     """Algoritma + hyperparameter konfigürasyonu otomatik seçer ve final koşum yapar.
     
@@ -3102,7 +3445,7 @@ def tune_and_run(fitness_fn, encoding,
     algorithms : iterable of str
         'bga', 'bde', 'bpso', 'babc', 'bgwo', 'bcs', 'bsos'
     methods : iterable of str
-        'classic', 'fdb', 'fdb_argmax' (her algoritmanın desteklediği)
+        'classic', 'fdb', 'rfdb'
     pop_sizes : iterable of int
     n_trials_per_config : int
         Her konfigürasyon için bağımsız koşum sayısı (farklı seed'lerle).
@@ -3120,6 +3463,7 @@ def tune_and_run(fitness_fn, encoding,
         trial_results : list of trial özetleri
         total_evaluations : kullanılan toplam eval sayısı
     """
+    methods = tuple(_normalize_method(m) for m in methods)  # fail-fast
     runners = {
         'bga': run_bga, 'bde': run_bde, 'bpso': run_bpso,
         'babc': run_babc, 'bgwo': run_bgwo,
@@ -3153,7 +3497,8 @@ def tune_and_run(fitness_fn, encoding,
                         r = runner(fitness_fn, encoding,
                                    method=method, pop_size=ps,
                                    max_iter=trial_iters,
-                                   seed=seed + trial_idx)
+                                   seed=seed + trial_idx,
+                                   n_jobs=n_jobs)
                         trial_fits.append(r['best_fit'])
                         eval_count += r['n_evaluations']
                     except (NotImplementedError, ValueError):
@@ -3184,7 +3529,7 @@ def tune_and_run(fitness_fn, encoding,
     final_result = final_runner(
         fitness_fn, encoding,
         method=best['method'], pop_size=best['pop_size'],
-        max_iter=final_iters, seed=seed,
+        max_iter=final_iters, seed=seed, n_jobs=n_jobs,
     )
     eval_count += final_result['n_evaluations']
     
@@ -3194,6 +3539,239 @@ def tune_and_run(fitness_fn, encoding,
         'trial_results': trial_results,
         'total_evaluations': eval_count,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BÖLÜM 9: VERİ-ODAKLI HIZLI BAŞLANGIÇ (v3.1)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Amaç: "Elimde bir CSV var (sağlık verisi, oyun telemetrisi, satış verisi...),
+# hangi sütunlar önemli?" sorusunu TEK fonksiyon çağrısıyla cevaplamak.
+# Kütüphanenin çekirdeği (run_* fonksiyonları) sklearn'e bağımlı DEĞİLDİR;
+# bu bölüm opsiyoneldir ve sklearn/pandas yoksa açıklayıcı hata verir.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def load_csv_dataset(path, target, drop=None, encoding='utf-8'):
+    """CSV dosyasından (X, y) çifti üretir. pandas gerektirir.
+
+    Sayısal olmayan özellik sütunları otomatik düşürülür (uyarıyla) —
+    kategorik sütunları kullanmak istiyorsan önce kendin one-hot/ordinal
+    kodla, sonra select_features'a DataFrame olarak ver.
+
+    Parameters
+    ----------
+    path : str
+        CSV dosya yolu.
+    target : str
+        Hedef değişkenin sütun adı.
+    drop : list of str or None
+        Özellik olarak KULLANILMAYACAK sütunlar (ID, isim, tarih vb.).
+    encoding : str, default='utf-8'
+        Dosya encoding'i.
+
+    Returns
+    -------
+    (X, y) : (pandas.DataFrame, pandas.Series)
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise ImportError(
+            "load_csv_dataset pandas gerektirir: pip install pandas"
+        )
+    df = pd.read_csv(path, encoding=encoding)
+    if target not in df.columns:
+        raise ValueError(
+            f"target='{target}' CSV'de yok. Mevcut sütunlar: {list(df.columns)}"
+        )
+    drop = list(drop) if drop else []
+    missing_drop = [c for c in drop if c not in df.columns]
+    if missing_drop:
+        raise ValueError(f"drop listesindeki sütun(lar) CSV'de yok: {missing_drop}")
+
+    y = df[target]
+    X = df.drop(columns=[target] + drop)
+
+    non_numeric = X.select_dtypes(exclude=['number']).columns.tolist()
+    if non_numeric:
+        print(f"[uyarı] Sayısal olmayan {len(non_numeric)} sütun düşürüldü: "
+              f"{non_numeric}. Kullanmak istiyorsan önce sayısal kodla "
+              f"(pd.get_dummies vb.).")
+        X = X.select_dtypes(include=['number'])
+    if X.shape[1] == 0:
+        raise ValueError("Hiç sayısal özellik sütunu kalmadı.")
+    return X, y
+
+
+def _infer_task(y):
+    """y'den görev tipini çıkarır: 'classification' veya 'regression'."""
+    y_arr = np.asarray(y)
+    if y_arr.dtype.kind in ('U', 'S', 'O', 'b'):  # string/object/bool
+        return 'classification'
+    uniq = np.unique(y_arr[~np.isnan(y_arr.astype(float))]) \
+        if y_arr.dtype.kind == 'f' else np.unique(y_arr)
+    # Tam sayı değerli ve az sayıda sınıf → classification
+    if len(uniq) <= 20 and np.allclose(uniq, np.round(uniq)):
+        return 'classification'
+    return 'regression'
+
+
+def select_features(X, y, task='auto', algorithm='bga', method='fdb',
+                    model=None, cv=5, scoring=None,
+                    pop_size=20, max_iter=30, seed=42, n_jobs=1,
+                    verbose=True, **algo_kwargs):
+    """Herhangi bir tablosal veri setinde meta-sezgisel özellik seçimi.
+
+    Veri kaynağı fark etmez: sağlık kayıtları, oyun telemetrisi, sensör
+    verisi... X sayısal bir tablo, y bir hedef sütun olduğu sürece çalışır.
+    scikit-learn gerektirir (yalnızca bu fonksiyon; çekirdek kütüphane değil).
+
+    Parameters
+    ----------
+    X : pandas.DataFrame veya numpy.ndarray, shape (n_samples, n_features)
+        Özellik matrisi. DataFrame verilirse sütun adları sonuçta korunur.
+        NaN içeriyorsa medyan ile doldurulur (uyarı basılır).
+    y : array-like, shape (n_samples,)
+        Hedef değişken.
+    task : {'auto', 'classification', 'regression'}
+        'auto' → y'den çıkarılır (≤20 tam-sayı benzersiz değer → classification).
+    algorithm : {'bga','bde','bpso','babc','bgwo','bcs','bsos'}
+    method : {'classic', 'fdb', 'rfdb'}
+    model : sklearn estimator or None
+        None → RandomForest(Classifier/Regressor)(n_estimators=100).
+        Kendi modelini verebilirsin (XGBoost, SVM...).
+    cv : int, default=5
+        K-fold sayısı (shuffle + seed ile deterministik).
+    scoring : str or None
+        sklearn scoring adı. None → classification: 'accuracy',
+        regression: 'r2'. Fitness = 1 − ortalama skor (minimize edilir).
+    pop_size, max_iter, seed : algoritma parametreleri.
+    n_jobs : int
+        Paralel fitness değerlendirme (yalnız destekleyen algoritma/modlarda).
+    verbose : bool
+        Bütçe özeti ve ilerleme bas.
+    **algo_kwargs
+        run_* fonksiyonuna aynen geçirilir (use_nsm=True, use_epm=True vb.).
+
+    Returns
+    -------
+    dict:
+        selected      : seçilen özellik adları (DataFrame ise) / indeksleri
+        mask          : 0/1 numpy vektörü
+        n_selected    : seçilen özellik sayısı
+        best_score    : seçilen alt-kümenin ortalama CV skoru (1 − best_fit)
+        task, scoring : kullanılan görev/metrik
+        result        : algoritmanın ham çıktı dict'i (history dahil)
+
+    Notes
+    -----
+    Toplam model eğitimi sayısı ≈ pop_size × (max_iter + 1) × cv.
+    Büyük veri setlerinde önce küçük bir pilotla (pop_size=5, max_iter=3)
+    süreyi ölç, sonra tam bütçeye geç.
+    """
+    try:
+        from sklearn.model_selection import cross_val_score, KFold, StratifiedKFold
+        from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+    except ImportError:
+        raise ImportError(
+            "select_features scikit-learn gerektirir: pip install scikit-learn"
+        )
+
+    method = _normalize_method(method)
+    runners = {
+        'bga': run_bga, 'bde': run_bde, 'bpso': run_bpso,
+        'babc': run_babc, 'bgwo': run_bgwo, 'bcs': run_bcs, 'bsos': run_bsos,
+    }
+    if algorithm not in runners:
+        raise ValueError(f"Bilinmeyen algorithm: '{algorithm}'. "
+                         f"Geçerli: {sorted(runners)}")
+
+    # Özellik adlarını yakala, numpy'a çevir
+    feature_names = None
+    if hasattr(X, 'columns'):
+        feature_names = list(X.columns)
+        X_arr = X.to_numpy(dtype=float)
+    else:
+        X_arr = np.asarray(X, dtype=float)
+    y_arr = np.asarray(y)
+    if X_arr.ndim != 2:
+        raise ValueError(f"X 2-boyutlu olmalı, verilen shape: {X_arr.shape}")
+    if len(y_arr) != X_arr.shape[0]:
+        raise ValueError(f"X ({X_arr.shape[0]} satır) ile y ({len(y_arr)}) uyumsuz.")
+
+    # NaN → medyan doldurma (uyarıyla)
+    if np.isnan(X_arr).any():
+        n_nan = int(np.isnan(X_arr).sum())
+        col_median = np.nanmedian(X_arr, axis=0)
+        col_median = np.where(np.isnan(col_median), 0.0, col_median)
+        nan_r, nan_c = np.where(np.isnan(X_arr))
+        X_arr[nan_r, nan_c] = col_median[nan_c]
+        print(f"[uyarı] X'te {n_nan} NaN bulundu → sütun medyanı ile dolduruldu. "
+              f"Daha iyi bir imputation istiyorsan veriyi önceden hazırla.")
+
+    # Görev tipi
+    if task == 'auto':
+        task = _infer_task(y_arr)
+        if verbose:
+            print(f"[bilgi] task='auto' → '{task}' olarak belirlendi "
+                  f"(y: {len(np.unique(y_arr))} benzersiz değer).")
+    if task not in ('classification', 'regression'):
+        raise ValueError(f"task 'auto'/'classification'/'regression' olmalı: {task}")
+
+    # Model + metrik
+    if model is None:
+        model = (RandomForestClassifier(n_estimators=100, random_state=seed)
+                 if task == 'classification'
+                 else RandomForestRegressor(n_estimators=100, random_state=seed))
+    if scoring is None:
+        scoring = 'accuracy' if task == 'classification' else 'r2'
+
+    if task == 'classification':
+        splitter = StratifiedKFold(n_splits=cv, shuffle=True, random_state=seed)
+    else:
+        splitter = KFold(n_splits=cv, shuffle=True, random_state=seed)
+
+    n_feat = X_arr.shape[1]
+    est_fits = pop_size * (max_iter + 1) * cv
+    if verbose:
+        print(f"[bilgi] {n_feat} özellik, {X_arr.shape[0]} örnek | "
+              f"{algorithm}+{method} | tahmini ~{est_fits} model eğitimi "
+              f"(pop {pop_size} × iter {max_iter} × cv {cv}).")
+
+    from sklearn.base import clone
+
+    def fitness(mask):
+        idx = np.flatnonzero(np.asarray(mask, dtype=int))
+        if len(idx) == 0:
+            return 2.0  # hiç özellik yok → en kötü (1 − skor üst sınırı üstü)
+        scores = cross_val_score(clone(model), X_arr[:, idx], y_arr,
+                                 cv=splitter, scoring=scoring)
+        return 1.0 - float(np.mean(scores))
+
+    enc = BinaryEncoding(n_features=n_feat)
+    result = runners[algorithm](fitness, enc, method=method,
+                                pop_size=pop_size, max_iter=max_iter,
+                                seed=seed, n_jobs=n_jobs, verbose=verbose,
+                                **algo_kwargs)
+
+    mask = np.asarray(result['best_sol'], dtype=int)
+    idx = np.flatnonzero(mask)
+    selected = ([feature_names[i] for i in idx] if feature_names is not None
+                else idx.tolist())
+    out = {
+        'selected': selected,
+        'mask': mask,
+        'n_selected': int(mask.sum()),
+        'best_score': 1.0 - float(result['best_fit']),
+        'task': task,
+        'scoring': scoring,
+        'result': result,
+    }
+    if verbose:
+        print(f"[sonuç] {out['n_selected']}/{n_feat} özellik seçildi | "
+              f"{scoring} = {out['best_score']:.4f}")
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3231,8 +3809,13 @@ __all__ = [
     "epm_guide_select",
     # Auto-tuning (v3-final-rc2)
     "tune_and_run",
+    # Veri-odaklı hızlı başlangıç (v3.1)
+    "select_features",
+    "load_csv_dataset",
     # Utility
     "fdb_scores",
+    "VALID_METHODS",
+    "SHOW_METHOD_HINTS",
     # Versiyon
     "__version__", "__author__", "__license__",
 ]

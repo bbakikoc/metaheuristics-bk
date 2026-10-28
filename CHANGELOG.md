@@ -1,5 +1,123 @@
 # Changelog
 
+## v0.3.5 — 2026-09-25
+
+### Düzeltme: `run_bde` continuous-dışı mutasyon oranı (KUSUR)
+- Binary/Categorical/Mixed/Permutation dallarında `encoding.mutate(rng, c1, F)`
+  çağrısı DE ölçek katsayısını (F=0.5) bit-çevirme olasılığı olarak geçiriyordu
+  → ikili BDE rastgele aramaya denk (OneMax n=60, 1000 FE: hata 14–20 vs
+  rastgele 18–20; MEALPY-DE 11.5; F=1/n → 0). Bulgu: mathandai projesi NB01
+  ikili sağlaması (validation/binary_sanity.py + mealpy_crosscheck.py).
+- Yeni parametre `noncont_mutation_rate: Optional[float] = None` → encoding
+  varsayılanı (Binary 1/n). `F`/`CR` yalnız ContinuousEncoding'de.
+- Davranış: continuous RNG akışı özdeş; binary BDE sonuçları v0.3.4 ile
+  KARŞILAŞTIRILAMAZ (yeniden koşum gerekir). Diğer 6 algoritma değişmedi.
+- Etki alanı notu: YL tezi (v8) Stage 08 BDE sonuçları v0.3.4 ile üretildi;
+  tez metninde beyan gerekir.
+
+## v0.3.4 — 2026-07-10
+
+### EPM resmi kod doğrulaması (FEX #181754, Üstünsoy et al. 2025)
+- `epm_population_update()` seçim indeksleri, resmi `pop_productions.m`
+  (Method-1) ve `pop_productions_2.m` (Method-2) transkriptleriyle 10.000
+  rastgele popülasyonda BİREBİR özdeş doğrulandı
+  (`validation/epm_matlab_crosscheck.py`, T1–T3).
+- Makale pseudo-kodundaki iki belirsizlik resmi kodla çözüldü; kütüphane
+  zaten doğru taraftaymış: (a) U = [P; Pchild] (ebeveynler önce — makale
+  Eq. 6'nın tersi), (b) akraba ofseti ±n (Algorithm-2'deki "n/2" yazımında
+  n = |U|). Ayrıntı: kod içi EPM UYARLAMA BEYANI bloğu.
+- Beyanlı kalan sapmalar: eşit-fitness'ta randperm (resmi) vs deterministik
+  (kütüphane); doldurma prosedürü; H3 rehber eşleşmesinin resmi kodda
+  algoritma/Case-özgü olması; resmi EPM-AGDE'nin epoch-içi açgözlü
+  değiştirmeyi koruması (makale Algorithm-4 ile çelişir — makale-kod farkı).
+- EPM continuous doğrulama durumu güncellendi: H2 çekirdeği "resmi kodla
+  doğrulanmış"; algoritma-bütünü için "EPM-uyarlaması" çerçevesi sürer.
+
+### Validation eklemeleri
+- `validation/epm_matlab_crosscheck.py` (yukarıdaki T1–T4).
+- `validation/fdb_sos_pilot3_reference.py` + `pilot3_reference_results.json`:
+  fdb_reference yön testi (CEC2017 D=10; kazanma sayıları fdb-referans 4/7,
+  classic 2/7, fdb-uyarlaması 1/7 — PİLOT, kanonik değil).
+
+### Davranış
+- **Davranış değişikliği YOK.** Yalnız dokümantasyon/yorum blokları ve sürüm
+  damgaları (README/RELEASE_NOTES/pyproject/`__version__`). RNG akışı
+  v0.3.3 ile özdeş — A/B probu 4 method kombinasyonunda bit-düzeyinde aynı
+  `best_fit` üretti.
+
+## v0.3.3 — 2026-07-10
+
+### Yeni: mesafe metriği parametreleştirildi (resmi FDB koduyla hiza)
+- `ContinuousEncoding(bounds, distance_metric=...)`: `'euclidean'` (varsayılan,
+  aralık-normalize — v3 davranışı, geriye uyumlu) | `'manhattan'` (HAM |a−b|
+  toplamı — resmi FDB-SOS MATLAB kodu FEX #72311 `fitnessDistanceBalance.m`
+  ile birebir) | `callable(a, b) -> float` (özel/uyarlanmış metrik).
+  Bilinmeyen değer `ValueError` (fail-fast). Gerekçe: KBS 2020 Algorithm 2
+  metriği kullanıcıya bırakır ("Select a distance metric"); kütüphane genel
+  amaçlı olduğundan metrik projeye göre seçilebilir olmalı.
+
+### Yeni: `run_bsos` FDB davranış parametreleri
+- `fdb_phases` (varsayılan: üç faz — tarihsel davranış), `fdb_refresh`
+  (`'iter'` varsayılan | `'selection'` = resmi kod), `fdb_exclude_self`
+  (varsayılan True). Bilinmeyen değerler `ValueError`.
+- `fdb_reference=True` preset'i: yalnız-mutualism + seçim-başına skor +
+  self dahil; ContinuousEncoding'de `distance_metric='manhattan'` ŞART
+  (değilse raise — sessiz metrik değişimi yok). Bu preset resmi kodla
+  yapısal hizadır; raporlarda "FDB-SOS (Kahraman 2020, resmi kod hizası)"
+  olarak etiketlenebilir. Preset dışı kombinasyonlar "FDB-uyarlaması"dır.
+
+### Davranış notları (pilot-etkili, kanonik sonuç yok)
+- `method='fdb'` partner seçimi: argmax kendisiyse artık uniform'a düşmez,
+  self hariç en yüksek skorlu birey seçilir (deterministik ve tutarlı).
+- BSOS'ta method≠classic RNG tüketim sırası değişti → v0.3.2 ile aynı seed
+  farklı akış verebilir. KANONİK KART'ta kanonik sayı bulunmadığından
+  (tümü pilot) yayın etkisi yoktur; yeni koşumlar v0.3.3 ile yapılır.
+
+### Doğrulama
+- `validation/fdb_matlab_crosscheck.py`: T1 makale örnek olayı (Fig. 1b)
+  birebir; T3 Manhattan metrikle resmi kod transkriptiyle 10.000 rastgele
+  popülasyonda 0.0 fark; T2 metrik farkının etkisi (%83.3 argmax uyuşması);
+  T4 preset duman testi. Testler: 18 → 28 (tests/test_fdb_reference.py).
+- Bulgu (SAVUNMA_DOSYASI adayı): KBS 2020 Tablo 3 kazanan varyantı SFDB2
+  (çarpımsal) olarak tanımlar; yayımlanan resmi kod ise toplamsal skoru
+  (normF + normD) uygular. Kütüphane resmi kodla aynı (toplamsal) taraftadır.
+
+
+## v0.3.1 — 2026-07-09
+
+### ⚠ KIRICI DEĞİŞİKLİK: method adları kalıcılaştı
+- `'fdb'` artık **deterministik klasik FDB** (Kahraman et al. 2020) — v3.0'daki `'fdb_argmax'`.
+- `'rfdb'` artık **rulet-FDB** (Aras et al. 2021) — v3.0'daki `'fdb'`.
+- `'fdb_argmax'` geriye-uyum alias'ı olarak kabul edilir → `'fdb'`ye eşlenir (tek seferlik uyarıyla).
+- **v3.0 scriptinde `method='fdb'` kullanan kod v3.1'de FARKLI (deterministik) davranır** — `'rfdb'`ye güncelle.
+- Her method ilk kullanımda tek satırlık hatırlatma basar; `SHOW_METHOD_HINTS = False` ile kapatılır.
+
+### Düzeltmeler
+- **BGWO (kritik):** V-shape transfer pozisyona değil ADIMA uygulanır + binary'de
+  birey-bazlı greedy seçim. v3.0'da OneMax(40)'ta ~13'te takılıyordu (BGA=0);
+  düzeltme sonrası ~2.6 (5 seed ort.). Ölü kod (kullanılmayan rand çekimi) silindi.
+  Regresyon testi: `test_bgwo_convergence`.
+- **Fail-fast:** bilinmeyen `method` değeri artık anında `ValueError` (v3.0'da
+  yazım hatası sessizce rulet davranışına düşüyordu).
+- **BPSO:** `'fdb'` ve `'rfdb'` artık farklı davranır (v3.0'da ikisi de argmax'a
+  düşüyordu). Regresyon testi: `test_bpso_methods_differ`.
+- `tune_and_run` artık `n_jobs` parametresini koşumlara geçirir.
+- BABC `limit` docstring'i kodla eşitlendi; BCS/BSOS docstring'leri 3 method'u belgeler.
+
+### Yenilikler
+- `select_features(X, y, ...)`: herhangi bir tablosal veri setinde (DataFrame/ndarray)
+  tek çağrıda meta-sezgisel özellik seçimi — task auto, NaN medyan-doldurma,
+  sütun adı korunumu, sklearn model enjeksiyonu.
+- `load_csv_dataset(path, target, drop=...)`: CSV → (X, y).
+- `examples/11_csv_feature_selection.py`.
+- NSM modülüne **uyarlama beyanı**: MPS/PS yaklaşıklamaları, erken-çıkış kuralları
+  ve sigmoid switch yönünün makaleden farkları kod içinde açıkça belgelendi;
+  NSM_PRESETS provenance'ı (MATLAB NSM.m) not edildi.
+
+### Test
+- 73 → **81 test** (fail-fast/alias 4, BGWO yakınsama 1, BPSO ayrımı 1, select_features 2).
+
+
 ## [0.3.0-rc2] - 2026-05-10 ⭐⭐⭐ v3-FINAL
 
 İlk başta v3.1'e bırakılan tüm geliştirmeler bu sürümde tamamlandı.
@@ -140,3 +258,15 @@ Tüm v2 işlevleri encoding-aware olarak v3'e taşındı + 4 yeni özellik.
 ## [0.3.0-alpha] - 2026-05-10
 - İlk universal sürüm: 4 encoding + 3 algoritma (BGA, BDE, BPSO)
 - 11/11 test
+
+## v0.3.2 (2026-07-09)
+- **BSOS düzeltmesi (continuous):** `ContinuousEncoding` için orijinal
+  Cheng & Prayogo (2014) aritmetik fazları eklendi (Mutual Vector + BF,
+  rand(-1,1) commensalism, boyut-altkümesi parasitism). Önceki
+  crossover-tabanlı davranış diğer encoding'lerde UYARLAMA olarak sürüyor.
+- Doğrulama: MEALPY OriginalSOS ile aynı bütçede Sphere/Rastrigin/Ackley'de
+  aynı mertebe (Rastrigin=0, Ackley=4.44e-16 birebir). Binary regresyon temiz.
+- **Yeni örnek:** `examples/12_method_comparison.py` — kendi probleminde
+  classic/fdb/rfdb karşılaştırma şablonu (doğrulama oturumu bulgularıyla).
+- `validation/` klasörü eklendi: MEALPY çapraz kontrol, SOS yeniden doğrulama,
+  EPM teşhis, FDB-SOS CEC2017 pilot scriptleri + sonuçlar + notlar.

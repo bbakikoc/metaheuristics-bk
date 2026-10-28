@@ -1,10 +1,10 @@
-# metaheuristics_bk v3-final
+# metaheuristics_bk v0.3.5
 
 > **Universal Meta-Heuristic Algorithms Library — Encoding-Aware**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.3.0--rc2-green.svg)]()
+[![Version](https://img.shields.io/badge/version-0.3.5-green.svg)]()
 [![Tests](https://img.shields.io/badge/tests-73%2F73-brightgreen.svg)]()
 
 Tek dosyalık (`metaheuristics_bk_v3.py`, ~3000 satır), encoding-agnostic
@@ -18,6 +18,8 @@ fitness eval + erken durdurma + checkpointing.
 > → sonuçları kaydetme. 6 tipik senaryo (feature selection, hyperparameter
 > tuning, TSP, function optimization, multi-objective, constrained) için
 > çalışan kod örnekleri içeriyor.
+
+> **Güncel sürüm: v0.3.5 (25 Eylül 2026).** Bu sürüm, "Equally accurate, differently selected" (PISA 2025 / UCI; OSF ön-kaydı https://osf.io/jw79y) çalışmasının tüm koşumlarında kullanılan dosyadır (`metaheuristics_bk_v3.py`, SHA-256 `1fdee83e63dcfb8135f22221e08ce0ae6c0aa21839417b5a0223ed6e70c02003`). v0.3.0-rc2 → v0.3.5 arasındaki değişiklikler (BGWO ikili güncelleme düzeltmesi, `fdb`/`rfdb` adlandırması, BSOS/FDB-SOS resmi kod hizası, EPM resmi kod doğrulaması, **ikili BDE mutasyon kusurunun düzeltilmesi**) için [CHANGELOG.md](CHANGELOG.md). Rehberlik modu adları v3.1'den itibaren `classic` / `fdb` (deterministik, Kahraman ve ark. 2020) / `rfdb` (rulet); eski `fdb_argmax` adı otomatik eşlenir. Aşağıdaki API metni v3-final (0.3.0-rc2) için yazılmıştır ve büyük ölçüde geçerlidir.
 
 ---
 

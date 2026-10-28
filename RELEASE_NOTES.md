@@ -1,3 +1,5 @@
+> **Not (28 Ekim 2026):** Bu notlar v3-final (0.3.0-rc2, Mayıs 2026) içindir. Güncel sürüm v0.3.5; sonraki değişiklikler CHANGELOG.md'de.
+
 # 🏁 v3-final TAMAMEN BİTTİ — 73/73 Test Geçer
 
 > **Bu sürümde planlanan tüm özellikler eksiksiz tamamlandı.**
